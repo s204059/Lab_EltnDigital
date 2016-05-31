@@ -1,18 +1,15 @@
 #include <hidef.h>      /* common defines and macros */
 #include "derivative.h"      /* derivative-specific definitions */
 
-#define thr1 3125 /* 1 kHz threshold */
-#define thr2 1563 /* 2 kHz threshold */
-#define thr3 781  /* 4 kHz threshold */
+static int oldv,newv,T,DC; /* static variables are initialized at 0 by default */
 
-static int oldv,newv,v,T,T1,DC; /* static variables are initialized at 0 by default */
+#define m 4
+#define q 25472
+#define scale_factor 128
 
 void main(void) {
   
-  DDRT = 0xF0; /* configure PTT7 to PTT4 (aka the LEDs) as outputs */
-  PTT = 0xF0;  /* turn off the LEDs */
-  
-  /* PLL is selected as clock source by default */
+  /* PLL is selected as clock source for the free running counter by default */
   
   while(!CPMUFLG_LOCK); /* wait until PLL is stable */
   
@@ -22,14 +19,31 @@ void main(void) {
   TIE_C0I = 1;     /* enable interrupt on channel 0 */
   // TSCR1_TFFCA = 1; /* enable the "fast flag clear" */
   
-  TSCR1_TEN = 1; /* enable the counter */     
-
-	EnableInterrupts;
-
-  for(;;)
-  {
+  TSCR1_TEN = 1; /* enable the counter */
+  
+  EnableInterrupts;
+  
+  /* PWM CONFIGURATION */
+  
+  /* the following instructions select CLKA as PWM clock */
+  PWMCLK_PCLK0 = 0;
+  PWMCLKAB_PCLKAB0 = 0; 
+  
+  PWMPRCLK_PCKA = 3; /* set to 3 the prescaler of CLKA */
+  PWMPOL_PPOL0 = 1;  /* set polarity so that the wave will start high */
+  PWMCAE_CAE0 = 0;   /* select left alignment */
+  
+  PWMPER0 = 255;  /* set the period as requested */
+  
+  PWMDTY0 = 127;  /* INITIALIZATION OF THE DUTY CYCLE */
+  
+  PWMCNT0 = 1;    /* reset the counter and load the channel configuration */
+  
+  PWME_PWME0 = 1; /*  enable the channel */
+  
+  for(;;) {
     _FEED_COP(); /* feeds the dog */
-  } 
+  }
 }
 
 #pragma CODE_SEG NON_BANKED
@@ -52,65 +66,9 @@ interrupt 8 void TIM_int0(void)
      
      TFLG1_C0F = 1; /* clear the flag */
   }
-  else
-  {
-    v = TC0;
-    
-    if(oldv > v)
-      T1 = 0xFFFF - oldv + v;
-     else
-      T1 = v - oldv;
-     
-     TFLG1_C0F = 1; /* clear the flag */
-  }
   
-  /* LEDs MANAGEMENT */
-  
-  /* frequency */
-  
-  if(T > thr1){
-    PTT_PTT5 = 1;
-    PTT_PTT4 = 1;
-  }
-  
-  if((T <= thr1)&(T > thr2)){
-    PTT_PTT5 = 1;
-    PTT_PTT4 = 0;
-  }
-  
-  if((T <= thr2)&(T > thr3)){
-    PTT_PTT5 = 0;
-    PTT_PTT4 = 1;
-  }
-  
-  if(T <= thr3){
-    PTT_PTT5 = 0;
-    PTT_PTT4 = 0;
-  }
-  
-  /* duty cycle */
-  
-  DC = (T1*8)/T;
-  
-  if(DC < 2){
-    PTT_PTT7 = 0;
-    PTT_PTT6 = 0;
-  }
-  
-  if((DC >= 2)&(DC < 4)){
-    PTT_PTT7 = 0;
-    PTT_PTT6 = 1;
-  }
-  
-  if((DC >= 4)&(DC < 6)){
-    PTT_PTT7 = 1;
-    PTT_PTT6 = 0;
-  }
-  
-  if(DC >= 6){
-    PTT_PTT7 = 1;
-    PTT_PTT6 = 1;
-  }
+  DC = (q - m * T)/scale_factor;
 }
 
 #pragma CODE_SEG DEFAULT
+
